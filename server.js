@@ -15,6 +15,8 @@ publicAddressFinder(function(err, data){
 	}
 });
 
+var port = config.port;
+
 function addCORSHeaders(req, res)
 {
 	if (req.method.toUpperCase() === "OPTIONS")
@@ -46,7 +48,7 @@ function writeResponse(res, httpCode, body) {
 }
 
 function sendInvalidURLResponse(res) {
-	return writeResponse(res, 404, "url must be in the form of /fetch/{some_url_here}");
+	return writeResponse(res, 404, "url must be in the form of /(fetch|httpresult)/{some_url_here}");
 }
 
 function sendTooBigResponse(res) {
@@ -70,11 +72,11 @@ function processRequest(req, res)
 
 	var result = config.fetch_regex.exec(req.url);
 
-	if (result && result.length == 2 && result[1]) {
+	if (result && result.length == 3 && result[2]) {
 		var remoteURL;
 
 		try {
-			remoteURL = url.parse(decodeURI(result[1]));
+			remoteURL = url.parse(decodeURI(result[2]));
 		}
 		catch (e) {
 			return sendInvalidURLResponse(res);
@@ -89,7 +91,7 @@ function processRequest(req, res)
 		// Naughty, naughty— deny requests to blacklisted hosts
 		if(config.blacklist_hostname_regex.test(remoteURL.hostname))
 		{
-			return writeResponse(res, 400, "naughty, naughty...");
+			return writeResponse(res, 400, "host is blacklisted");
 		}
 
 		// We only support http and https
@@ -137,6 +139,14 @@ function processRequest(req, res)
 
 		});
 
+		if (result[1] == 'httpresult') {
+			proxyRequest.on('response', function(response) {
+				console.log("Response code: " + response.statusCode);
+				res.setHeader('content-type', 'application/json');
+				return writeResponse(res, 200, "{\"statusCode\":" + response.statusCode + "}");
+			});
+		}
+
 		var requestSize = 0;
 		var proxyResponseSize = 0;
 
@@ -150,6 +160,10 @@ function processRequest(req, res)
 				return sendTooBigResponse(res);
 			}
 		});
+
+		if (result[1] == 'httpresult') {
+			return;
+		}
 
 		proxyRequest.pipe(res).on('data', function (data) {
 
@@ -201,6 +215,6 @@ http.createServer(function (req, res) {
 		processRequest(req, res);
 	}
 
-}).listen(config.port);
+}).listen(port);
 
-console.log("thingproxy.freeboard.io started");
+console.log("listening on port " + port);
