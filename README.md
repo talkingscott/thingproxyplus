@@ -22,7 +22,7 @@ For CORS or HTTPS support, just prefix any url with http(s)://your-server:your-p
 For example:
 
 ```
-http://my.freeboard.server:3000/fetch/http://my.api.com/get/stuff
+http://my.proxy.server:3000/fetch/http://my.api.com/get/stuff
 ```
 
 Any HTTP method, headers and body you send, will be sent to the URL you specify and the response will be sent back to you with the proper CORS headers attached.
@@ -32,7 +32,7 @@ To get a JSON response with the HTTP result of a "plain" HTTP action, prefix the
 For example:
 
 ```
-http://my.freeboard.server:3000/httpresult/http://my.web.server/any-path
+http://my.proxy.server:3000/httpresult/http://my.web.server/any-path
 ```
 
 ### caveats
