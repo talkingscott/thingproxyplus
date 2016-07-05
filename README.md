@@ -1,7 +1,7 @@
 thingproxyplus
 ==============
 
-A forward proxy server that handles responses that don't support CORS, HTTPS and or JSON.  Forked from (https://github.com/Freeboard/thingproxy).
+A forward proxy server that handles responses that don't support CORS, HTTPS and or JSON.  Also a static web server.  Forked from (https://github.com/Freeboard/thingproxy).
 
 ### what?
 
@@ -9,7 +9,9 @@ thingproxyplus allows javascript code on your site to access resources on other 
 
 In addition, some browsers don't allow requests for non-encrypted HTTP data if the page itself is loaded from HTTPS. thingproxyplus also allows you to access non-secure HTTP API's from a secure HTTPS url. 
 
-Finally, some HTTP endpoints you use may not return JSON.  thingproxyplus can marshal some non-JSON responses into JSON.  The initial implementation of this proxies an HTTP response to JSON containing the HTTP result status.
+Further, some HTTP endpoints you use may not return JSON.  thingproxyplus can marshal some non-JSON responses into JSON.  The initial implementation of this proxies an HTTP response to JSON containing the HTTP result status.
+
+Finally, you may need a static web server to serve, say, freeboard.  That's included, too.
 
 ### why?
 
@@ -34,6 +36,8 @@ For example:
 ```
 http://my.proxy.server:3000/httpresult/http://my.web.server/any-path
 ```
+
+To serve up static content, set config.document_root to point to the directory holding the content.
 
 ### caveats
 

@@ -1,4 +1,6 @@
 var http = require('http');
+var fs = require('fs');
+var path = require('path');
 var config = require("./config");
 var url = require("url");
 var request = require("request");
@@ -143,7 +145,8 @@ function processRequest(req, res)
 			proxyRequest.on('response', function(response) {
 				console.log("Response code: " + response.statusCode);
 				res.setHeader('content-type', 'application/json');
-				return writeResponse(res, 200, "{\"statusCode\":" + response.statusCode + "}");
+				proxyResponse = {statusCode: response.statusCode, isSuccess: (response.statusCode >= 200 && response.statusCode < 300)};
+				return writeResponse(res, 200, JSON.stringify(proxyResponse));
 			});
 		}
 
@@ -177,7 +180,19 @@ function processRequest(req, res)
 		});
 	}
 	else {
-		return sendInvalidURLResponse(res);
+		var fullpath = path.join(config.document_root, req.url);
+		console.info('Open ' + fullpath);
+		try {
+			var rs = fs.createReadStream(fullpath);
+			rs.on('end', function () {
+				res.end();
+			})
+			res.statusCode = 200;
+			rs.pipe(res);
+		} catch (e) {
+			console.error(e);
+			return sendInvalidURLResponse(res);
+		}
 	}
 }
 
