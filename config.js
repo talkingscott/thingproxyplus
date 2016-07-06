@@ -1,4 +1,5 @@
 exports.document_root = '/usr/local/wwwroot';
+exports.default_doc = 'index.html';
 exports.port = process.env.PORT || 3000;
 exports.enable_logging = true;
 exports.fetch_regex = /^\/(fetch|httpresult)\/(.*)$/; // The URL to look for when parsing the request.

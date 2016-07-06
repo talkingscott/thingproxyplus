@@ -44,17 +44,18 @@ function addCORSHeaders(req, res)
 	}
 }
 
-function writeResponse(res, httpCode, body) {
+function writeResponse(res, httpCode, body, logger) {
 	res.statusCode = httpCode;
 	res.end(body);
+	logger(httpCode);
 }
 
-function sendInvalidURLResponse(res) {
-	return writeResponse(res, 404, "url must be in the form of /(fetch|httpresult)/{some_url_here}");
+function sendNotFoundResponse(res, logger) {
+	return writeResponse(res, 404, "", logger);
 }
 
-function sendTooBigResponse(res) {
-	return writeResponse(res, 413, "the content in the request or response cannot exceed " + config.max_request_length + " characters.");
+function sendTooBigResponse(res, logger) {
+	return writeResponse(res, 413, "the content in the request or response cannot exceed " + config.max_request_length + " characters.", logger);
 }
 
 function getClientAddress(req) {
@@ -62,14 +63,14 @@ function getClientAddress(req) {
 		|| req.connection.remoteAddress;
 }
 
-function processRequest(req, res)
+function processRequest(req, res, logger)
 {
 	addCORSHeaders(req, res);
 
 	// Return options pre-flight requests right away
 	if (req.method.toUpperCase() === "OPTIONS")
 	{
-		return writeResponse(res, 204);
+		return writeResponse(res, 204, logger);
 	}
 
 	var result = config.fetch_regex.exec(req.url);
@@ -81,24 +82,24 @@ function processRequest(req, res)
 			remoteURL = url.parse(decodeURI(result[2]));
 		}
 		catch (e) {
-			return sendInvalidURLResponse(res);
+			return sendInvalidURLResponse(res, logger);
 		}
 
 		// We don't support relative links
 		if(!remoteURL.host)
 		{
-			return writeResponse(res, 404, "relative URLS are not supported");
+			return writeResponse(res, 404, "relative URLS are not supported", logger);
 		}
 
 		// Naughty, naughty— deny requests to blacklisted hosts
 		if(config.blacklist_hostname_regex.test(remoteURL.hostname))
 		{
-			return writeResponse(res, 400, "host is blacklisted");
+			return writeResponse(res, 400, "host is blacklisted", logger);
 		}
 
 		// We only support http and https
 		if (remoteURL.protocol != "http:" && remoteURL.protocol !== "https:") {
-			return writeResponse(res, 400, "only http and https are supported");
+			return writeResponse(res, 400, "only http and https are supported", logger);
 		}
 
 		if(publicIP)
@@ -131,22 +132,22 @@ function processRequest(req, res)
 
 			if(err.code === "ENOTFOUND")
 			{
-				return writeResponse(res, 502, "host cannot be found.")
+				return writeResponse(res, 502, "host cannot be found.", logger)
 			}
 			else
 			{
 				console.log("Proxy Request Error: " + err.toString());
-				return writeResponse(res, 500);
+				return writeResponse(res, 500, logger);
 			}
 
 		});
 
 		if (result[1] == 'httpresult') {
 			proxyRequest.on('response', function(response) {
-				console.log("Response code: " + response.statusCode);
+				// console.info('Response code: ' + response.statusCode);
 				res.setHeader('content-type', 'application/json');
 				proxyResponse = {statusCode: response.statusCode, isSuccess: (response.statusCode >= 200 && response.statusCode < 300)};
-				return writeResponse(res, 200, JSON.stringify(proxyResponse));
+				return writeResponse(res, 200, JSON.stringify(proxyResponse), logger);
 			});
 		}
 
@@ -160,7 +161,7 @@ function processRequest(req, res)
 			if(requestSize >= config.max_request_length)
 			{
 				proxyRequest.end();
-				return sendTooBigResponse(res);
+				return sendTooBigResponse(res, logger);
 			}
 		});
 
@@ -175,59 +176,65 @@ function processRequest(req, res)
 			if(proxyResponseSize >= config.max_request_length)
 			{
 				proxyRequest.end();
-				return sendTooBigResponse(res);
+				return sendTooBigResponse(res, logger);
 			}
+
+			logger(200);			
 		});
 	}
 	else {
 		var fullpath = path.join(config.document_root, req.url);
-		console.info('Open ' + fullpath);
-		try {
-			var rs = fs.createReadStream(fullpath);
-			rs.on('end', function () {
-				res.end();
-			})
-			res.statusCode = 200;
-			rs.pipe(res);
-		} catch (e) {
-			console.error(e);
-			return sendInvalidURLResponse(res);
+		if (fullpath.endsWith("/")) {
+			fullpath = path.join(fullpath, config.default_doc);
 		}
+		var rs = fs.createReadStream(fullpath);
+		rs.on('error', function (err) {
+			console.error('Piping ' + fullpath + ': ' + err);
+			return sendNotFoundResponse(res, logger);
+		});
+		rs.on('end', function () {
+			// console.info('Piped ' + fullpath);
+			res.end();
+		})
+		res.statusCode = 200;
+		rs.pipe(res);
+		logger(200);
 	}
 }
 
 http.createServer(function (req, res) {
 
+	var clientIP = getClientAddress(req);
+
+	var logger = function (resultCode) {
+		if(config.enable_logging)
+		{
+			console.log("%s %s %s %s %s", (new Date()).toJSON(), clientIP, resultCode, req.method, req.url);
+		}
+	};
+
 	// Process AWS health checks
 	if(req.url === "/health")
 	{
-		return writeResponse(res, 200);
+		return writeResponse(res, 200, logger);
 	}
-
-	var clientIP = getClientAddress(req);
 
 	req.clientIP = clientIP;
-
-	// Log our request
-	if(config.enable_logging)
-	{
-		console.log("%s %s %s", (new Date()).toJSON(), clientIP, req.method, req.url);
-	}
 
 	if(config.enable_rate_limiting)
 	{
 		throttle.rateLimit(clientIP, function(err, limited) {
 			if (limited)
 			{
-				return writeResponse(res, 429, "enhance your calm");
+				return writeResponse(res, 429, "enhance your calm", logger);
 			}
 
-			processRequest(req, res);
+			resultCode = processRequest(req, res, logger);
 		})
 	}
 	else
 	{
-		processRequest(req, res);
+		resultCode = processRequest(req, res, logger);
 	}
 
 }).listen(port);
