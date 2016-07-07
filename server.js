@@ -58,6 +58,12 @@ function sendTooBigResponse(res, logger) {
 	return writeResponse(res, 413, "the content in the request or response cannot exceed " + config.max_request_length + " characters.", logger);
 }
 
+function trace(msg) {
+	if (config.enable_tracing) {
+		console.log(msg);
+	}
+}
+
 function getClientAddress(req) {
 	return (req.headers['x-forwarded-for'] || '').split(',')[0]
 		|| req.connection.remoteAddress;
@@ -65,11 +71,14 @@ function getClientAddress(req) {
 
 function processRequest(req, res, logger)
 {
+	trace('Request URL: ' + req.url);
+
 	addCORSHeaders(req, res);
 
 	// Return options pre-flight requests right away
 	if (req.method.toUpperCase() === "OPTIONS")
 	{
+		trace('OPTIONS request');
 		return writeResponse(res, 204, logger);
 	}
 
@@ -78,27 +87,33 @@ function processRequest(req, res, logger)
 	if (result && result.length == 3 && result[2]) {
 		var remoteURL;
 
+		trace('Unparsed remote URL: ' + result[2]);
 		try {
 			remoteURL = url.parse(decodeURI(result[2]));
+			trace('RemoteURL: ' + url.format(remoteURL));
 		}
 		catch (e) {
+			trace('URL parsing failed: ' + e);
 			return sendInvalidURLResponse(res, logger);
 		}
 
 		// We don't support relative links
 		if(!remoteURL.host)
 		{
+			trace('Relative URL: ' + remoteURL);
 			return writeResponse(res, 404, "relative URLS are not supported", logger);
 		}
 
 		// Naughty, naughty— deny requests to blacklisted hosts
 		if(config.blacklist_hostname_regex.test(remoteURL.hostname))
 		{
+			trace('Blacklisted host: ' + remoteURL.hostname);
 			return writeResponse(res, 400, "host is blacklisted", logger);
 		}
 
 		// We only support http and https
 		if (remoteURL.protocol != "http:" && remoteURL.protocol !== "https:") {
+			trace('Unsupported scheme: ' + remoteURL.protocol);
 			return writeResponse(res, 400, "only http and https are supported", logger);
 		}
 
@@ -113,11 +128,13 @@ function processRequest(req, res, logger)
 			{
 				req.headers["x-forwarded-for"] = req.clientIP + ", " + publicIP;
 			}
+			trace('x-forwarded-for set: ' + req.headers['x-forwarded-for']);
 		}
 
         // Make sure the host header is to the URL we're requesting, not thingproxy
         if(req.headers["host"]) {
             req.headers["host"] = remoteURL.host;
+			trace('host set: ' + req.headers['host']);
         }
 
 		var proxyRequest = request({
@@ -129,22 +146,34 @@ function processRequest(req, res, logger)
 		});
 
 		proxyRequest.on('error', function(err){
+			trace('Error on proxy request: ' + err);
 
-			if(err.code === "ENOTFOUND")
-			{
-				return writeResponse(res, 502, "host cannot be found.", logger)
-			}
-			else
-			{
-				console.log("Proxy Request Error: " + err.toString());
-				return writeResponse(res, 500, logger);
+			if (res.headersSent) {
+				trace('Headers already sent, just end response');
+				res.end();
+				return;
 			}
 
+			if (result[1] === 'httpresult') {
+				res.setHeader('content-type', 'application/json');
+				proxyResponse = {statusCode: err.code === "ENOTFOUND" ? 502 : 500, isSuccess: false};
+				return writeResponse(res, 200, JSON.stringify(proxyResponse), logger);
+			} else {
+				if(err.code === "ENOTFOUND")
+				{
+					return writeResponse(res, 502, "host cannot be found.", logger)
+				}
+				else
+				{
+					console.log("Proxy Request Error: " + err.toString());
+					return writeResponse(res, 500, "", logger);
+				}
+			}
 		});
 
-		if (result[1] == 'httpresult') {
-			proxyRequest.on('response', function(response) {
-				// console.info('Response code: ' + response.statusCode);
+		if (result[1] === 'httpresult') {
+			proxyRequest.on('response', function (response) {
+				trace('Response on proxy request: ' + response.statusCode);
 				res.setHeader('content-type', 'application/json');
 				proxyResponse = {statusCode: response.statusCode, isSuccess: (response.statusCode >= 200 && response.statusCode < 300)};
 				return writeResponse(res, 200, JSON.stringify(proxyResponse), logger);
@@ -154,27 +183,32 @@ function processRequest(req, res, logger)
 		var requestSize = 0;
 		var proxyResponseSize = 0;
 
-		req.pipe(proxyRequest).on('data', function(data){
+		req.pipe(proxyRequest);
+		req.on('data', function (data) {
+			trace('Data piped from request to proxy request; length: ' + data.length);
 
 			requestSize += data.length;
 
-			if(requestSize >= config.max_request_length)
-			{
+			if (requestSize >= config.max_request_length) {
+				trace('Request too large: ' + requestSize);
 				proxyRequest.end();
 				return sendTooBigResponse(res, logger);
 			}
 		});
 
-		if (result[1] == 'httpresult') {
+		if (result[1] === 'httpresult') {
 			return;
 		}
 
-		proxyRequest.pipe(res).on('data', function (data) {
+		proxyRequest.pipe(res);
+		proxyRequest.on('data', function (data) {
+			trace('Data piped from proxy request to result; length: ' + data.length);
 
 			proxyResponseSize += data.length;
 
 			if(proxyResponseSize >= config.max_request_length)
 			{
+				trace('Response too large: ' + proxyResponseSize);
 				proxyRequest.end();
 				return sendTooBigResponse(res, logger);
 			}
@@ -187,13 +221,16 @@ function processRequest(req, res, logger)
 		if (fullpath.endsWith("/")) {
 			fullpath = path.join(fullpath, config.default_doc);
 		}
+
+		trace('Static content requested: ' + fullpath);
+
 		var rs = fs.createReadStream(fullpath);
 		rs.on('error', function (err) {
 			console.error('Piping ' + fullpath + ': ' + err);
 			return sendNotFoundResponse(res, logger);
 		});
 		rs.on('end', function () {
-			// console.info('Piped ' + fullpath);
+			trace('Piped: ' + fullpath);
 			res.end();
 		})
 		res.statusCode = 200;
@@ -216,6 +253,7 @@ http.createServer(function (req, res) {
 	// Process AWS health checks
 	if(req.url === "/health")
 	{
+		trace('Health check');
 		return writeResponse(res, 200, logger);
 	}
 
@@ -226,6 +264,7 @@ http.createServer(function (req, res) {
 		throttle.rateLimit(clientIP, function(err, limited) {
 			if (limited)
 			{
+				trace('Limited');
 				return writeResponse(res, 429, "enhance your calm", logger);
 			}
 

@@ -1,6 +1,7 @@
 exports.document_root = '/usr/local/wwwroot';
 exports.default_doc = 'index.html';
 exports.port = process.env.PORT || 3000;
+exports.enable_tracing = false;
 exports.enable_logging = true;
 exports.fetch_regex = /^\/(fetch|httpresult)\/(.*)$/; // The URL to look for when parsing the request.
 exports.proxy_request_timeout_ms = 10000; // The length of time we'll wait for a proxy server to respond before timing out.
