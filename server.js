@@ -212,8 +212,11 @@ function processRequest(req, res, logger)
 				proxyRequest.end();
 				return sendTooBigResponse(res, logger);
 			}
-
-			logger(200);			
+		});
+		proxyRequest.on('end', function () {
+			trace('Done piping from proxy request to result');
+			res.end();
+			logger(200);
 		});
 	}
 	else {
@@ -232,10 +235,10 @@ function processRequest(req, res, logger)
 		rs.on('end', function () {
 			trace('Piped: ' + fullpath);
 			res.end();
-		})
+			logger(200);
+		});
 		res.statusCode = 200;
 		rs.pipe(res);
-		logger(200);
 	}
 }
 
